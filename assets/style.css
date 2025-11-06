@@ -1,0 +1,108 @@
+#owc-bubble{
+    position:fixed !important;
+    bottom:25px !important;
+    right:25px !important;
+    width:62px !important;
+    height:62px !important;
+    background:#0073aa !important;
+    color:#fff !important;
+    border-radius:50% !important;
+    font-size:34px !important;
+    line-height:62px !important;
+    text-align:center !important;
+    cursor:pointer !important;
+    box-shadow:0 6px 20px rgba(0,0,0,.4) !important;
+    z-index:99999 !important;
+    transition:all .3s !important;
+    display:flex !important;
+    align-items:center;
+    justify-content:center;
+}
+#owc-bubble:hover{transform:scale(1.1)}
+#owc-bubble.pulse{animation:pulse 1.5s infinite}
+@keyframes pulse{
+    0%,100%{transform:scale(1)}
+    50%{transform:scale(1.15)}
+}
+
+#owc-chat{
+    position:fixed !important;
+    bottom:100px !important;
+    right:25px !important;
+    width:380px !important;
+    height:560px !important;
+    background:#fff !important;
+    border-radius:18px !important;
+    box-shadow:0 15px 40px rgba(0,0,0,.3) !important;
+    z-index:99998 !important;
+    display:flex !important;
+    flex-direction:column !important;
+    opacity:0 !important;
+    transform:translateY(20px) !important;
+    transition:all .35s ease !important;
+    pointer-events:none !important;
+}
+#owc-chat:not(.closed){
+    opacity:1 !important;
+    transform:translateY(0) !important;
+    pointer-events:all !important;
+}
+
+#owc-header{
+    background:#0073aa;
+    color:#fff;
+    padding:14px 18px;
+    font-weight:600;
+    border-radius:18px 18px 0 0;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+#owc-close{cursor:pointer; font-size:26px;}
+
+#owc-messages{
+    flex:1;
+    padding:16px;
+    overflow-y:auto;
+    background:#f9f9f9;
+    font-size:15px;
+}
+#owc-messages div{
+    margin:12px 0;
+    padding:12px 16px;
+    border-radius:16px;
+    max-width:84%;
+    word-wrap:break-word;
+}
+.user{background:#e3f2fd; align-self:flex-end; margin-left:auto;}
+.bot{background:#c8e6c9;}
+
+#owc-input{
+    display:flex;
+    padding:14px;
+    background:#fff;
+    border-top:1px solid #eee;
+}
+#owc-text{
+    flex:1;
+    padding:12px 16px;
+    border:2px solid #0073aa;
+    border-radius:12px;
+    outline:none;
+    font-size:15px;
+}
+#owc-text:focus{
+    border-color:#005a87;
+    box-shadow:0 0 0 4px rgba(0,115,170,.3);
+}
+#owc-send{
+    margin-left:10px;
+    background:#0073aa;
+    color:#fff;
+    border:none;
+    width:46px;
+    height:46px;
+    border-radius:50%;
+    cursor:pointer;
+    font-size:20px;
+}
