@@ -59,6 +59,7 @@
     align-items:center;
 }
 #owc-close{cursor:pointer; font-size:26px;}
+#owc-bot-name{font-weight:600;}
 
 #owc-messages{
     flex:1;
@@ -104,5 +105,8 @@
     height:46px;
     border-radius:50%;
     cursor:pointer;
-    font-size:20px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
 }
+#owc-send svg{width:20px;height:20px;}
