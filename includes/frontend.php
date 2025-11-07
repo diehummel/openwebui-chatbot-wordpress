@@ -122,7 +122,7 @@ function owc_chat() {
     }
 
     // === System-Prompt für KI ===
-    $system_prompt = "Du bist ein KI-Assistent für diese Website. Antworte kurz, hilfreich und auf Deutsch. "
+    $system_prompt = "Du bist ein KI-Assistent für diese Website. Antworte kurz, präzise und hilfreich. "
                    . "Wenn ein passender Artikel existiert, verweise darauf mit dem Link. "
                    . "Wenn nicht, antworte allgemein – du darfst auf alle Themen eingehen.";
 
