@@ -4,34 +4,28 @@ if (!defined('ABSPATH')) exit;
 add_action('wp_ajax_owc_chat', 'owc_chat');
 add_action('wp_ajax_nopriv_owc_chat', 'owc_chat');
 
-// === Stemming ===
+// === Einfaches Stemming (für bessere Treffer) ===
 function owc_simple_stem($word) {
     $word = strtolower(trim($word));
     if (strlen($word) < 3) return $word;
     return preg_replace('/(s|es|en|ung|lich)$/i', '', $word);
 }
 
-// === Keywords extrahieren ===
+// === Relevante Wörter extrahieren (ohne Beispiele) ===
 function owc_get_relevant_keywords($msg) {
-    $stopwords = ['ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'ist', 'bin', 'sei', 'hab', 'habe', 'mir', 'dir', 'wie', 'geht', 'es', 'wer', 'bist', 'du'];
+    $stopwords = ['ich', 'du', 'er', 'sie', 'es', 'der', 'die', 'das', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'zu', 'ist', 'bin', 'habe', 'hat', 'sein', 'war', 'wird', 'wie', 'was', 'wo', 'wann', 'wer', 'warum', 'dass', 'ein', 'eine', 'einen', 'einem', 'einer', 'eines'];
     $words = preg_split('/\s+/', strtolower($msg));
     $relevant = [];
-    $synonyms = [
-        'pagespeed' => ['page speed', 'pagespeedinsights', 'ladezeit', 'performance', 'optimierung'],
-        'tutorial' => ['anleitung', 'guide', 'hilfe', 'tunen'],
-        'wordpress' => ['wp', 'cms', 'blog'],
-    ];
+
     foreach ($words as $w) {
         if (strlen($w) < 3 || in_array($w, $stopwords)) continue;
         $relevant[] = $w;
-        if (isset($synonyms[$w])) {
-            $relevant = array_merge($relevant, $synonyms[$w]);
-        }
     }
+
     return array_unique($relevant);
 }
 
-// === API URL – 100% robust ===
+// === Robuste API-URL ===
 function owc_get_api_url() {
     $protocol = trim(get_option('owc_protocol', 'http://'));
     $host = trim(get_option('owc_host', 'localhost'));
@@ -68,9 +62,9 @@ function owc_crawl() {
     return count($data);
 }
 
-// === Hauptfunktion: Jede Frage → OpenWebUI + lokaler Kontext ===
+// === Hauptfunktion: Jede Frage → OpenWebUI + optionaler Link ===
 function owc_chat() {
-    // === DEBUG ===
+    // === DEBUG (optional, später deaktivieren) ===
     error_log('OWC: AJAX gestartet. POST: ' . print_r($_POST, true));
 
     // === NONCE ===
@@ -86,14 +80,14 @@ function owc_chat() {
         return;
     }
 
-    // === Crawl falls nötig ===
+    // === Crawl falls leer ===
     $site = get_option('owc_site', []);
     if (empty($site)) {
         owc_crawl();
         $site = get_option('owc_site', []);
     }
 
-    // === Lokaler Kontext suchen ===
+    // === Lokalen Artikel suchen ===
     $words = owc_get_relevant_keywords($msg);
     $top_match = null;
 
@@ -122,15 +116,21 @@ function owc_chat() {
         }
 
         if (!empty($matches)) {
-            usort($matches, fn($a, $b) => $b['score'] <=> $a['score']);
+            usort($matches, fn($a, $b) => $b['score'] <=> $a['score]);
             $top_match = $matches[0];
         }
     }
 
-    // === Kontext für KI ===
+    // === System-Prompt für KI ===
+    $system_prompt = "Du bist ein KI-Assistent für diese Website. Antworte kurz, hilfreich und auf Deutsch. "
+                   . "Wenn ein passender Artikel existiert, verweise darauf mit dem Link. "
+                   . "Wenn nicht, antworte allgemein – du darfst auf alle Themen eingehen.";
+
     $context = $top_match
-        ? "Es gibt einen passenden Artikel auf dieser Website:\nTitel: {$top_match['title']}\nLink: {$top_match['url']}\n\nNutze diesen Link, falls die Frage dazu passt."
-        : "Kein passender Artikel auf dieser Website gefunden. Antworte allgemein.";
+        ? "Es gibt einen passenden Artikel:\nTitel: {$top_match['title']}\nLink: {$top_match['url']}"
+        : "Kein passender Artikel auf dieser Website gefunden.";
+
+    $user_message = "Frage: $msg\n\nKontext zur Website: $context";
 
     // === API-Call ===
     $model = trim(get_option('owc_model', 'gemma3:4b'));
@@ -140,12 +140,6 @@ function owc_chat() {
     if (!empty($api_key)) {
         $headers['Authorization'] = 'Bearer ' . $api_key;
     }
-
-    $system_prompt = "Du bist ein KI-Assistent für diese Website. Antworte kurz, hilfreich und auf Deutsch. "
-                   . "Wenn ein passender Artikel existiert, verweise darauf. "
-                   . "Wenn nicht, antworte allgemein – du darfst auch auf externe Themen eingehen.";
-
-    $user_message = "Frage: $msg\n\nKontext zur Website: $context";
 
     $api_url = owc_get_api_url();
     error_log("OWC: API → $api_url | Modell: $model");
@@ -176,15 +170,16 @@ function owc_chat() {
 
     $code = wp_remote_retrieve_response_code($res);
     $body = wp_remote_retrieve_body($res);
-    error_log("OWC Response: $code | " . substr($body, 0, 300));
 
     if ($code !== 200) {
+        error_log("OWC HTTP-Fehler: $code | $body");
         wp_send_json_error("OpenWebUI-Fehler $code");
         return;
     }
 
     $json = json_decode($body, true);
     if (!$json || !isset($json['choices'][0]['message']['content'])) {
+        error_log("OWC: Ungültige JSON-Antwort: " . substr($body, 0, 300));
         wp_send_json_error("KI hat nicht geantwortet.");
         return;
     }
