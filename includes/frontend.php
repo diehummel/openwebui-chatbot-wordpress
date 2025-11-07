@@ -6,13 +6,12 @@ add_action('wp_ajax_nopriv_owc_chat', 'owc_chat');
 
 // === VERBESSERT: Stoppwörter-Filter + Keyword-Extraktion ===
 function owc_get_relevant_keywords($msg) {
-    $stopwords = ['ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'ist', 'bin', 'sei', 'hab', 'habe']; // Deutsch-Stoppwörter
+    $stopwords = ['ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'ist', 'bin', 'sei', 'hab', 'habe'];
     $words = preg_split('/\s+/', strtolower($msg));
     $relevant = [];
     $synonyms = [
         'pagespeed' => ['page speed', 'pagespeedinsights', 'ladezeit', 'performance', 'optimierung'],
         'tutorial' => ['anleitung', 'guide', 'hilfe', 'tunen'],
-        // Erweitere bei Bedarf
     ];
     foreach ($words as $w) {
         if (strlen($w) < 3 || in_array($w, $stopwords)) continue;
@@ -24,11 +23,11 @@ function owc_get_relevant_keywords($msg) {
     return array_unique($relevant);
 }
 
-// Hilfsfunktion: Einfaches Stemming (für Web-Begriffe)
+// Hilfsfunktion: Einfaches Stemming
 function owc_simple_stem($word) {
     $word = strtolower(trim($word));
     if (strlen($word) < 3) return $word;
-    $word = preg_replace('/(s|es|en|ung|lich)$/i', '', $word); // Einfache Endungs-Entfernung
+    $word = preg_replace('/(s|es|en|ung|lich)$/i', '', $word);
     return $word;
 }
 
@@ -36,7 +35,7 @@ function owc_get_api_url() {
     $protocol = get_option('owc_protocol', 'https://');
     $host     = get_option('owc_host', '');
     $port     = get_option('owc_port', '');
-    return rtrim($protocol . $host . ':' . $port, ':') . '/api/v1/chat/completions';
+    return rtrim($protocol . $host . ':' . $port, ':') . '/api/chat/completions';
 }
 
 function owc_chat() {
@@ -46,52 +45,52 @@ function owc_chat() {
     $site = get_option('owc_site', []);
     if (empty($site)) { owc_crawl(); $site = get_option('owc_site', []); }
 
-    // === VERBESSERT: Nur relevante Keywords ===
     $words = owc_get_relevant_keywords($msg);
 
-    // === Mehrere Matches sammeln (Top 2) ===
+    // === VERBESSERT: Nur Top 1 Match (kürzer) ===
     $matches = [];
     foreach ($site as $p) {
         $text = strtolower($p['title'] . ' ' . $p['content'] . ' ' . ($p['excerpt'] ?? ''));
         $score = 0;
         foreach ($words as $w) {
             $stem_w = owc_simple_stem($w);
-            $score += substr_count($text, $w) * 20;  // Höheres Basis-Gewicht
+            $score += substr_count($text, $w) * 20;
             $score += substr_count($text, $stem_w) * 10;
-            if (stripos($p['title'], $w) !== false) $score += 200;  // Starke Title-Priorität
-            if (stripos($text, $w) !== false) $score += 80;  // Content-Boost
+            if (stripos($p['title'], $w) !== false) $score += 200;
+            if (stripos($text, $w) !== false) $score += 80;
         }
-        if ($score > 15) {  // Niedriger Threshold für bessere Treffer
+        if ($score > 15) {
             $matches[] = [
                 'score' => $score,
                 'url' => get_permalink($p['id']) ?: '#',
                 'title' => $p['title'],
-                'excerpt' => $p['excerpt'] ?? substr(strip_tags($p['content']), 0, 150) . '...'
+                'excerpt' => substr(strip_tags($p['content']), 0, 50) . '...'  // Kürzer: 50 Zeichen
             ];
         }
     }
 
-    // === Top-Matches sortieren ===
     usort($matches, function($a, $b) { return $b['score'] <=> $a['score']; });
-    $top_matches = array_slice($matches, 0, 2);  // Bis zu 2 Links
+    $top_match = !empty($matches) ? $matches[0] : null;  // Nur 1
 
+    // === GEFIXT: Kürzerer Kontext ===
     $local_context = '';
-    if (!empty($top_matches)) {
-        foreach ($top_matches as $match) {
-            $local_context .= "Lokaler Artikel: \"{$match['title']}\"\nURL: {$match['url']}\nAuszug: {$match['excerpt']}\n\n";
-        }
+    if ($top_match) {
+        $local_context = "Lokaler Artikel: \"{$top_match['title']}\"\nURL: {$top_match['url']}\nAuszug: {$top_match['excerpt']}\n\n";
     } else {
-        $local_context = "Keine passende lokale Seite gefunden. Antworte allgemein zu: $msg\n";
+        $local_context = "Keine passende lokale Seite gefunden.\n";
     }
 
-    // === Stärkerer Prompt ===
-    $system = "Du bist ein hilfreicher Website-Assistent für diese WordPress-Seite.\n" .
-              "VERWENDE IMMER den lokalen Kontext – baue deine Antwort darauf auf und erwähne die Artikel explizit!\n" .
-              "Halte Antworten kurz und relevant. Füge Links ein, wo sinnvoll.\n" .
-              $local_context .
-              "User-Frage: $msg\nAntworte auf Deutsch.";
+    // === GEFIXT: Kürzerer Prompt (Kontext in User-Message) ===
+    $system = "Du bist ein hilfreicher Website-Assistent.\nVERWENDE den lokalen Kontext, falls vorhanden – erwähne Artikel explizit!\nAntworte kurz auf Deutsch.";
+    $user_message = $msg . "\n\nKontext: " . $local_context;
 
-    // === API-Key ===
+    // Token-Proxy-Check (strlen > 2000 → zu lang, Fallback)
+    $prompt_length = strlen($system . $user_message);
+    if ($prompt_length > 2000) {
+        error_log("OWC Warn: Prompt zu lang ($prompt_length Zeichen) – Kontext gekürzt.");
+        $user_message = $msg . "\n\nKontext: " . $local_context . "(Vollständiger Inhalt zu lang – siehe Link oben.)";
+    }
+
     $api_key = get_option('owc_api_key', '');
 
     $headers = ['Content-Type' => 'application/json'];
@@ -99,52 +98,58 @@ function owc_chat() {
         $headers['Authorization'] = 'Bearer ' . $api_key;
     }
 
-    $res = wp_remote_post(owc_get_api_url(), [
+    $api_url = owc_get_api_url();
+    error_log("OWC Debug: Calling $api_url | Prompt-Länge: $prompt_length | Modell: " . get_option('owc_model', ''));
+
+    $res = wp_remote_post($api_url, [
         'headers' => $headers,
         'body' => json_encode([
             'model' => get_option('owc_model', ''),
             'messages' => [
                 ['role' => 'system', 'content' => $system],
-                ['role' => 'user', 'content' => $msg]
+                ['role' => 'user', 'content' => $user_message]  // Kontext hier
             ],
             'temperature' => 0.7,
             'stream' => false
-        ]),
-        'timeout' => 90
+        ], JSON_UNESCAPED_UNICODE),
+        'timeout' => 120
     ]);
 
     if (is_wp_error($res)) {
-        wp_send_json_error('OpenWebUI offline: ' . $res->get_error_message());
+        $error_msg = $res->get_error_message();
+        error_log("OWC WP_Error: $error_msg");
+        wp_send_json_error('OpenWebUI-Verbindung fehlgeschlagen: ' . $error_msg . '. Überprüfe URL und Server.');
     }
 
     $code = wp_remote_retrieve_response_code($res);
     $body = wp_remote_retrieve_body($res);
+    error_log("OWC Response: Code $code | Body-Start: " . substr($body, 0, 200));  // Kürzerer Log
+
     if ($code !== 200) {
-        wp_send_json_error("Fehler $code: $body");
+        $error_detail = "HTTP $code: " . substr($body, 0, 500);
+        if ($code == 413 || $code == 500) $error_detail .= ' (Möglicherweise zu langer Prompt – versuche kürzere Query.)';
+        elseif ($code == 401) $error_detail .= ' (Ungültiger API-Key – neu generieren?)';
+        elseif ($code == 404) $error_detail .= ' (Falscher Endpoint – checke OpenWebUI-URL)';
+        wp_send_json_error("OpenWebUI-Fehler: $error_detail");
     }
 
     $json = json_decode($body, true);
-    $answer = $json['choices'][0]['message']['content'] ?? 'Oops';
+    $answer = $json['choices'][0]['message']['content'] ?? 'Oops – keine Antwort erhalten.';
 
-    // === VERBESSERT: Links zu Top-Matches anhängen ===
-    $link_text = '';
-    if (!empty($top_matches)) {
-        foreach ($top_matches as $match) {
-            $link_text .= "\n\nMehr dazu: <a href=\"{$match['url']}\" target=\"_blank\" rel=\"noopener\" style=\"color:#0073aa; font-weight:bold; text-decoration:underline;\">{$match['title']}</a>";
-        }
-        $answer .= $link_text;
+    // === Link anhängen (nur wenn Match) ===
+    if ($top_match) {
+        $answer .= "\n\nMehr dazu: <a href=\"{$top_match['url']}\" target=\"_blank\" rel=\"noopener\" style=\"color:#0073aa; font-weight:bold; text-decoration:underline;\">{$top_match['title']}</a>";
     }
 
     $answer = preg_replace(
         '/(https?:\/\/[^\s\)]+)/',
-        '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>',
+        '<a href="$1" target="_blank" rel="noopener" style=\"color:#0073aa; text-decoration:underline;\">$1</a>',
         $answer
     );
 
     wp_send_json_success($answer);
 }
 
-// === Crawl (unverändert, aber Excerpt hilft) ===
 function owc_crawl() {
     $posts = get_posts([
         'numberposts' => -1,
