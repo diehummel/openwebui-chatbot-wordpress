@@ -4,6 +4,13 @@ if (!defined('ABSPATH')) exit;
 add_action('wp_ajax_owc_chat', 'owc_chat');
 add_action('wp_ajax_nopriv_owc_chat', 'owc_chat');
 
+// === Stemming (FEHLTE!) ===
+function owc_simple_stem($word) {
+    $word = strtolower(trim($word));
+    if (strlen($word) < 3) return $word;
+    return preg_replace('/(s|es|en|ung|lich)$/i', '', $word);
+}
+
 // === Keywords ===
 function owc_get_relevant_keywords($msg) {
     $stopwords = ['ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'ist', 'bin', 'sei', 'hab', 'habe', 'mir', 'dir', 'wie', 'geht', 'es'];
@@ -33,7 +40,7 @@ function owc_is_external_topic($msg) {
     return false;
 }
 
-// === API URL – KORREKT FÜR OPENWEBUI! ===
+// === API URL – OPENWEBUI KOMPATIBEL ===
 function owc_get_api_url() {
     $protocol = get_option('owc_protocol', 'http://');
     $host     = get_option('owc_host', 'localhost');
@@ -99,10 +106,10 @@ function owc_chat() {
     $top_match = !empty($matches) ? $matches[0] : null;
 
     // === MODELL SICHERN ===
-    $model = trim(get_option('owc_model', ''));
+    $model = trim(get_option('owc_model', 'gemma3:4b'));
     if (empty($model)) {
-        $model = 'gemma3:1b';
-        error_log("OWC: Kein Modell → Fallback: gemma3:1b");
+        $model = 'gemma3:4b';
+        error_log("OWC: Kein Modell → Fallback: gemma3:4b");
     }
 
     // === Kurzer Prompt ===
