@@ -48,23 +48,20 @@ function owc_chat() {
     $site = get_option('owc_site', []);
     if (empty($site)) { owc_crawl(); $site = get_option('owc_site', []); }
 
-    // === VERBESSERT: Erweiterte Word-Extraktion ===
+    // Erweiterte Word-Extraktion
     $words = owc_get_expanded_words($msg);
 
     $best_url = $best_title = $best_excerpt = '';
     $best_score = 0;
 
     foreach ($site as $p) {
-        // === VERBESSERT: Mehr Content (Title + Content + Excerpt) ===
         $text = strtolower($p['title'] . ' ' . $p['content'] . ' ' . ($p['excerpt'] ?? ''));
-        
         $score = 0;
         foreach ($words as $w) {
-            $score += substr_count($text, $w) * 15;  // Höheres Gewicht
-            if (stripos($p['title'], $w) !== false) $score += 150;  // Stärkerer Title-Boost
-            if (stripos($text, $w) !== false) $score += 50;  // Allgemeiner Boost
+            $score += substr_count($text, $w) * 15;
+            if (stripos($p['title'], $w) !== false) $score += 150;
+            if (stripos($text, $w) !== false) $score += 50;
         }
-        
         if ($score > $best_score) {
             $best_score = $score;
             $best_url = get_permalink($p['id']) ?: '#';
@@ -73,22 +70,21 @@ function owc_chat() {
         }
     }
 
-    // === VERBESSERT: Niedrigerer Schwellenwert + Fallback ===
+    // Prompt mit Kontext
     $local_context = '';
-    if ($best_score > 20) {  // Von 30 auf 20 gesenkt
+    if ($best_score > 20) {
         $local_context = "Lokaler Artikel: \"$best_title\"\nURL: $best_url\nAuszug: $best_excerpt\n\n";
     } else {
         $local_context = "Keine passende lokale Seite gefunden. Antworte allgemein zu: $msg\n";
     }
 
-    // === VERBESSERT: Stärkerer RAG-Prompt (explizit Kontext nutzen) ===
     $system = "Du bist ein hilfreicher Website-Assistent für diese WordPress-Seite.\n" .
               "VERWENDE IMMER den folgenden lokalen Kontext, falls vorhanden – baue deine Antwort darauf auf!\n" .
               "Halte Antworten kurz und relevant. Füge Links ein, wo sinnvoll.\n" .
               $local_context .
               "User-Frage: $msg\nAntworte auf Deutsch.";
 
-    // === API-Key (aus vorheriger Erweiterung) ===
+    // API-Key
     $api_key = get_option('owc_api_key', '');
 
     $headers = ['Content-Type' => 'application/json'];
@@ -123,6 +119,11 @@ function owc_chat() {
     $json = json_decode($body, true);
     $answer = $json['choices'][0]['message']['content'] ?? 'Oops';
 
+    // === NEU: Link hinzufügen, wenn lokaler Artikel gefunden ===
+    if ($best_score > 20) {
+        $answer .= "\n\nMehr dazu: <a href='$best_url' target='_blank' rel='noopener' style='color:#0073aa; text-decoration:underline;'>$best_title</a>";
+    }
+
     $answer = preg_replace(
         '/(https?:\/\/[^\s\)]+)/',
         '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>',
@@ -132,7 +133,6 @@ function owc_chat() {
     wp_send_json_success($answer);
 }
 
-// === VERBESSERT: Crawl erweitert um Excerpt ===
 function owc_crawl() {
     $posts = get_posts([
         'numberposts' => -1,
@@ -146,7 +146,7 @@ function owc_crawl() {
             'id' => $p->ID,
             'title' => $p->post_title,
             'content' => wp_strip_all_tags($p->post_content),
-            'excerpt' => wp_strip_all_tags($p->post_excerpt ?: wp_trim_words($p->post_content, 50, '...'))  // Neu: Excerpt hinzufügen
+            'excerpt' => wp_strip_all_tags($p->post_excerpt ?: wp_trim_words($p->post_content, 50, '...'))
         ];
     }
     update_option('owc_site', $data);
