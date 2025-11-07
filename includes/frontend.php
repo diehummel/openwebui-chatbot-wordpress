@@ -43,8 +43,16 @@ function owc_chat() {
     }
     $system .= "Antworte kurz. Frage: $msg";
 
+    // === NEU: API-Key einlesen ===
+    $api_key = get_option('owc_api_key', '');
+
+    $headers = ['Content-Type' => 'application/json'];
+    if (!empty($api_key)) {
+        $headers['Authorization'] = 'Bearer ' . $api_key;
+    }
+
     $res = wp_remote_post(owc_get_api_url(), [
-        'headers' => ['Content-Type' => 'application/json'],
+        'headers' => $headers,
         'body' => json_encode([
             'model' => get_option('owc_model', 'gemma3:latest'),
             'messages' => [
