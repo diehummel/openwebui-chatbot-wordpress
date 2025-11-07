@@ -12,12 +12,14 @@ function owc_admin_page() {
         update_option('owc_port', sanitize_text_field($_POST['port']));
         update_option('owc_model', sanitize_text_field($_POST['model']));
         update_option('owc_welcome', wp_kses_post($_POST['welcome']));
+        // === NEU: API-Key speichern ===
+        update_option('owc_api_key', sanitize_text_field($_POST['api_key']));
         echo '<div class="notice notice-success"><p>Einstellungen gespeichert!</p></div>';
     }
 
     if (isset($_POST['crawl'])) {
         $count = owc_crawl();
-        echo '<div class="notice notice-success"><p>113 Seiten NEU gecrawlt!</p></div>';
+        echo '<div class="notice notice-success"><p>' . $count . ' Seiten NEU gecrawlt!</p></div>';
     }
 
     $protocol = get_option('owc_protocol', 'https://');
@@ -25,6 +27,8 @@ function owc_admin_page() {
     $port     = get_option('owc_port', '443');
     $model    = get_option('owc_model', 'gemma3:latest');
     $welcome  = get_option('owc_welcome', "Hallo! Ich bin dein KI-Assistent.\nFrag mich alles über diese Website!");
+    // === NEU: API-Key laden ===
+    $api_key  = get_option('owc_api_key', '');
 
     ?>
     <div class="wrap">
@@ -52,6 +56,18 @@ function owc_admin_page() {
                     <th>Modell</th>
                     <td><input type="text" name="model" value="<?= esc_attr($model) ?>" class="regular-text" placeholder="gemma3:latest"></td>
                 </tr>
+
+                <!-- === NEU: API-Key Feld === -->
+                <tr>
+                    <th>API-Key</th>
+                    <td>
+                        <input type="password" name="api_key" value="<?= esc_attr($api_key) ?>" class="regular-text" autocomplete="off" placeholder="z.B. owk_abc123..." />
+                        <p class="description">
+                            <strong>Optional:</strong> In OpenWebUI → <em>Settings → API → Generate Key</em>
+                        </p>
+                    </td>
+                </tr>
+
                 <tr>
                     <th>Willkommensnachricht</th>
                     <td><textarea name="welcome" rows="4" class="large-text"><?= esc_textarea($welcome) ?></textarea></td>
