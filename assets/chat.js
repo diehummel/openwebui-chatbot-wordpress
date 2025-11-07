@@ -5,8 +5,8 @@ jQuery(function ($) {
     const $i = $('#owc-text');
     const $s = $('#owc-send');
     const $x = $('#owc-close');
-    const $header = $('#owc-header');
     let first = true;
+    let typingInterval = null;
 
     $c.addClass('closed');
 
@@ -19,7 +19,7 @@ jQuery(function ($) {
 
     // === Schließen mit Bestätigung ===
     $x.on('click', () => {
-        if ($m.children().length > 1) { // Nur fragen, wenn Nachrichten da sind
+        if ($m.children().length > 1) {
             if (confirm('Chatverlauf löschen und neu starten?')) {
                 $m.empty();
                 welcome();
@@ -42,20 +42,53 @@ jQuery(function ($) {
         scroll();
     }
 
+    function showTyping() {
+        const $typing = $('<div class="bot typing">').html(
+            '<span class="dot"></span><span class="dot"></span><span class="dot"></span>'
+        );
+        $m.append($typing);
+        scroll();
+
+        let dots = 0;
+        typingInterval = setInterval(() => {
+            dots = (dots + 1) % 4;
+            $typing.find('.dot').eq(0).css('opacity', dots > 0 ? 1 : 0.3);
+            $typing.find('.dot').eq(1).css('opacity', dots > 1 ? 1 : 0.3);
+            $typing.find('.dot').eq(2).css('opacity', dots > 2 ? 1 : 0.3);
+        }, 400);
+    }
+
+    function hideTyping() {
+        if (typingInterval) clearInterval(typingInterval);
+        $m.find('.typing').remove();
+    }
+
     function send() {
         let msg = $i.val().trim();
         if (!msg) return;
+
         $m.append('<div class="user">Du: ' + msg + '</div>');
-        $i.val(''); scroll();
+        $i.val(''); 
+        scroll();
+
+        // === Lade-Animation starten ===
+        showTyping();
 
         $.post(owc.ajax, {
             action: 'owc_chat',
             msg: msg,
             nonce: owc.nonce
         }, r => {
+            // === Lade-Animation stoppen ===
+            hideTyping();
+
             let text = r.success ? r.data : 'Fehler';
             text = text.replace(/(https?:\/\/[^\s\)]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>');
             $m.append('<div class="bot">' + text + '</div>');
+            scroll();
+        }).fail(() => {
+            hideTyping();
+            $m.append('<div class="bot error">Verbindung fehlgeschlagen.</div>');
             scroll();
         });
     }
