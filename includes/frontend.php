@@ -33,12 +33,12 @@ function owc_is_external_topic($msg) {
     return false;
 }
 
-// === API URL ===
+// === API URL – KORREKT FÜR OPENWEBUI! ===
 function owc_get_api_url() {
     $protocol = get_option('owc_protocol', 'http://');
     $host     = get_option('owc_host', 'localhost');
-    $port     = get_option('owc_port', '11434');
-    return rtrim($protocol . $host . ':' . $port, ':') . '/api/chat';
+    $port     = get_option('owc_port', '8080');
+    return rtrim($protocol . $host . ':' . $port, ':') . '/api/v1/chat/completions';
 }
 
 // === Hauptfunktion ===
@@ -98,11 +98,11 @@ function owc_chat() {
     usort($matches, fn($a, $b) => $b['score'] <=> $a['score']);
     $top_match = !empty($matches) ? $matches[0] : null;
 
-    // === SICHERES MODELL ===
-    $model = get_option('owc_model');
+    // === MODELL SICHERN ===
+    $model = trim(get_option('owc_model', ''));
     if (empty($model)) {
-        $model = 'gemma3:1b';  // Fallback-Modell
-        error_log("OWC: Kein Modell im Admin eingetragen → Fallback: gemma3:1b");
+        $model = 'gemma3:1b';
+        error_log("OWC: Kein Modell → Fallback: gemma3:1b");
     }
 
     // === Kurzer Prompt ===
@@ -113,14 +113,14 @@ function owc_chat() {
     $user_message = "$msg\nKontext: $context";
 
     // === API-Call ===
-    $api_key = get_option('owc_api_key', '');
+    $api_key = trim(get_option('owc_api_key', ''));
     $headers = ['Content-Type' => 'application/json'];
     if (!empty($api_key)) {
         $headers['Authorization'] = 'Bearer ' . $api_key;
     }
 
     $api_url = owc_get_api_url();
-    error_log("OWC: API Call → $api_url | Modell: $model | Prompt: " . substr($user_message, 0, 100));
+    error_log("OWC: API Call → $api_url | Modell: $model");
 
     $res = wp_remote_post($api_url, [
         'headers' => $headers,
@@ -131,11 +131,8 @@ function owc_chat() {
                 ['role' => 'user', 'content' => $user_message]
             ],
             'temperature' => 0.7,
-            'stream' => false,
-            'options' => [
-                'num_ctx' => 2048,
-                'num_predict' => 100
-            ]
+            'max_tokens' => 150,
+            'stream' => false
         ], JSON_UNESCAPED_UNICODE),
         'timeout' => 300
     ]);
@@ -158,12 +155,12 @@ function owc_chat() {
     }
 
     $json = json_decode($body, true);
-    if (!isset($json['message']['content'])) {
+    if (!isset($json['choices'][0]['message']['content'])) {
         wp_send_json_error("KI hat nicht geantwortet.");
         return;
     }
 
-    $answer = $json['message']['content'];
+    $answer = $json['choices'][0]['message']['content'];
 
     // === Link anhängen ===
     if ($top_match) {
