@@ -33,13 +33,6 @@ function owc_is_external_topic($msg) {
     return false;
 }
 
-// === Stemming ===
-function owc_simple_stem($word) {
-    $word = strtolower(trim($word));
-    if (strlen($word) < 3) return $word;
-    return preg_replace('/(s|es|en|ung|lich)$/i', '', $word);
-}
-
 // === API URL ===
 function owc_get_api_url() {
     $protocol = get_option('owc_protocol', 'http://');
@@ -64,7 +57,7 @@ function owc_chat() {
 
     $words = owc_get_relevant_keywords($msg);
 
-    // === Keine Keywords → kein API-Call! ===
+    // === Keine Keywords → keine Suche ===
     if (empty($words)) {
         wp_send_json_success("Frag nach einem Thema aus der Website – z.B. 'Pagespeed' oder 'WordPress'!");
         return;
@@ -82,7 +75,7 @@ function owc_chat() {
         }
         if (!$title_match) continue;
 
-        $content_lower = strtolower(substr($p['content'], 0, 3000)); // Max 3000 Zeichen!
+        $content_lower = strtolower(substr($p['content'], 0, 2000));
         $text = $title_lower . ' ' . $content_lower;
 
         $score = 0;
@@ -105,7 +98,14 @@ function owc_chat() {
     usort($matches, fn($a, $b) => $b['score'] <=> $a['score']);
     $top_match = !empty($matches) ? $matches[0] : null;
 
-    // === SUPER KURZER PROMPT ===
+    // === SICHERES MODELL ===
+    $model = get_option('owc_model');
+    if (empty($model)) {
+        $model = 'gemma3:1b';  // Fallback-Modell
+        error_log("OWC: Kein Modell im Admin eingetragen → Fallback: gemma3:1b");
+    }
+
+    // === Kurzer Prompt ===
     $system = "Du bist ein KI-Assistent für diese Website. Antworte kurz und hilfreich.";
     $context = $top_match
         ? "Artikel: {$top_match['title']} – {$top_match['url']}"
@@ -119,10 +119,13 @@ function owc_chat() {
         $headers['Authorization'] = 'Bearer ' . $api_key;
     }
 
-    $res = wp_remote_post(owc_get_api_url(), [
+    $api_url = owc_get_api_url();
+    error_log("OWC: API Call → $api_url | Modell: $model | Prompt: " . substr($user_message, 0, 100));
+
+    $res = wp_remote_post($api_url, [
         'headers' => $headers,
         'body' => json_encode([
-            'model' => get_option('owc_model', 'gemma2:2b'),
+            'model' => $model,
             'messages' => [
                 ['role' => 'system', 'content' => $system],
                 ['role' => 'user', 'content' => $user_message]
@@ -130,35 +133,46 @@ function owc_chat() {
             'temperature' => 0.7,
             'stream' => false,
             'options' => [
-                'num_ctx' => 2048,  // Max Kontext
-                'num_predict' => 100  // Max Antwortlänge
+                'num_ctx' => 2048,
+                'num_predict' => 100
             ]
         ], JSON_UNESCAPED_UNICODE),
         'timeout' => 300
     ]);
 
+    // === Fehlerbehandlung ===
     if (is_wp_error($res)) {
-        error_log('OWC ERROR: ' . $res->get_error_message());
-        wp_send_json_error('KI ist gerade beschäftigt. Versuch’s in 10 Sekunden nochmal.');
+        $err = $res->get_error_message();
+        error_log("OWC WP_Error: $err");
+        wp_send_json_error("Verbindung fehlgeschlagen: $err");
+        return;
     }
 
     $code = wp_remote_retrieve_response_code($res);
     $body = wp_remote_retrieve_body($res);
+    error_log("OWC Response: Code $code | Body: " . substr($body, 0, 300));
 
     if ($code !== 200) {
-        error_log("OWC API Fehler $code: $body");
-        wp_send_json_error('KI-Antwort fehlt. Frag anders oder später.');
+        wp_send_json_error("OpenWebUI-Fehler $code");
+        return;
     }
 
     $json = json_decode($body, true);
-    $answer = $json['message']['content'] ?? 'Keine Antwort.';
+    if (!isset($json['message']['content'])) {
+        wp_send_json_error("KI hat nicht geantwortet.");
+        return;
+    }
 
+    $answer = $json['message']['content'];
+
+    // === Link anhängen ===
     if ($top_match) {
         $link = '<a href="' . esc_url($top_match['url']) . '" target="_blank" rel="noopener" style="color:#0073aa; font-weight:bold; text-decoration:underline;">' . esc_html($top_match['title']) . '</a>';
         $answer .= "\n\nMehr dazu: $link";
         $answer = str_replace($top_match['url'], '', $answer);
     }
 
+    // === URLs verlinken ===
     $answer = preg_replace(
         '/(https?:\/\/[^\s\)<]+)(?![^<]*<\/a>)/',
         '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>',
