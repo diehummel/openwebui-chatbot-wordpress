@@ -138,12 +138,17 @@ function owc_chat() {
 
     // === Link anhängen (nur wenn Match) ===
     if ($top_match) {
-        $answer .= "\n\nMehr dazu: <a href=\"{$top_match['url']}\" target=\"_blank\" rel=\"noopener\" style=\"color:#0073aa; font-weight:bold; text-decoration:underline;\">{$top_match['title']}</a>";
+        $link_html = '<a href="' . esc_url($top_match['url']) . '" target="_blank" rel="noopener" style="color:#0073aa; font-weight:bold; text-decoration:underline;">' . esc_html($top_match['title']) . '</a>';
+        $answer .= "\n\nMehr dazu: " . $link_html;
+        
+        // === WICHTIG: URL aus dem Text entfernen, damit preg_replace sie nicht nochmal verlinkt ===
+        $answer = str_replace($top_match['url'], '', $answer);
     }
 
+    // === Nur URLs verlinken, die NICHT schon in einem <a> sind ===
     $answer = preg_replace(
-        '/(https?:\/\/[^\s\)]+)/',
-        '<a href="$1" target="_blank" rel="noopener" style=\"color:#0073aa; text-decoration:underline;\">$1</a>',
+        '/(https?:\/\/[^\s\)<]+)(?![^<]*<\/a>)/',
+        '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>',
         $answer
     );
 
