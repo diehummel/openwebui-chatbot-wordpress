@@ -105,32 +105,25 @@ function owc_chat() {
         }
     }
 
-    // === Sortieren ===
     usort($matches, function($a, $b) { 
         return $b['score'] <=> $a['score']; 
     });
     $top_match = !empty($matches) ? $matches[0] : null;
 
-    // === MODELL SICHERN ===
+    // === MODELL & API-Key ===
     $model = trim(get_option('owc_model', 'gemma3:4b'));
-    if (empty($model)) {
-        $model = 'gemma3:4b';
-        error_log("OWC: Kein Modell im Admin → Fallback: gemma3:4b");
+    $api_key = trim(get_option('owc_api_key', ''));
+
+    $headers = ['Content-Type' => 'application/json'];
+    if (!empty($api_key)) {
+        $headers['Authorization'] = 'Bearer ' . $api_key;
     }
 
-    // === Kurzer Prompt ===
     $system = "Du bist ein KI-Assistent für diese Website. Antworte kurz und hilfreich.";
     $context = $top_match
         ? "Artikel: {$top_match['title']} – {$top_match['url']}"
         : "Kein passender Artikel.";
     $user_message = "$msg\nKontext: $context";
-
-    // === API-Call ===
-    $api_key = trim(get_option('owc_api_key', ''));
-    $headers = ['Content-Type' => 'application/json'];
-    if (!empty($api_key)) {
-        $headers['Authorization'] = 'Bearer ' . $api_key;
-    }
 
     $api_url = owc_get_api_url();
     error_log("OWC: API Call → $api_url | Modell: $model");
@@ -160,7 +153,7 @@ function owc_chat() {
 
     $code = wp_remote_retrieve_response_code($res);
     $body = wp_remote_retrieve_body($res);
-    error_log("OWC Response: Code $code | Body: " . substr($body, 0, 300));
+    error_log("OWC Response: Code $code | Body: " . substr($body, 0, 500));
 
     if ($code !== 200) {
         wp_send_json_error("OpenWebUI-Fehler $code");
@@ -168,12 +161,25 @@ function owc_chat() {
     }
 
     $json = json_decode($body, true);
-    if (!isset($json['choices'][0]['message']['content'])) {
-        wp_send_json_error("KI hat nicht geantwortet.");
+    if (!$json || !isset($json['choices'][0])) {
+        wp_send_json_error("Ungültige Antwort von KI.");
         return;
     }
 
-    $answer = $json['choices'][0]['message']['content'];
+    // === ROBUSTE EXTRAKTION (OpenAI-kompatibel) ===
+    $choice = $json['choices'][0];
+    $answer = '';
+
+    if (isset($choice['message']['content'])) {
+        $answer = $choice['message']['content'];
+    } elseif (isset($choice['text'])) {
+        $answer = $choice['text'];
+    } elseif (isset($choice['delta']['content'])) {
+        $answer = $choice['delta']['content'];
+    } else {
+        wp_send_json_error("KI hat nicht geantwortet (kein Inhalt).");
+        return;
+    }
 
     // === Link anhängen ===
     if ($top_match) {
@@ -192,7 +198,7 @@ function owc_chat() {
     wp_send_json_success($answer);
 }
 
-// === Crawl (gefixt – keine doppelte Zeile!) ===
+// === Crawl ===
 function owc_crawl() {
     $posts = get_posts([
         'numberposts' => -1,
@@ -205,7 +211,7 @@ function owc_crawl() {
         $data[] = [
             'id' => $p->ID,
             'title' => $p->post_title,
-            'content' => wp_strip_all_tags($p->post_content)  // Geändert: $p->post_content
+            'content' => wp_strip_all_tags($p->post_content)
         ];
     }
     update_option('owc_site', $data);
