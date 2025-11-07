@@ -148,22 +148,22 @@ function owc_chat() {
         $err = $res->get_error_message();
         error_log("OWC WP_Error: $err");
         wp_send_json_error("Verbindung fehlgeschlagen: $err");
-        return;
+       return;
     }
 
     $code = wp_remote_retrieve_response_code($res);
     $body = wp_remote_retrieve_body($res);
-    error_log("OWC Response: Code $code | Body: " . substr($body, 0, 500));
+
+    // === DEBUG: Alles ins Log ===
+    error_log("OWC Response Code: $code");
+    error_log("OWC Response Body: " . substr($body, 0, 1000));
+    error_log("OWC Request URL: " . $api_url);
+    error_log("OWC Model: " . $model);
+    error_log("OWC Headers: " . print_r($headers, true));
 
     if ($code !== 200) {
-        wp_send_json_error("OpenWebUI-Fehler $code");
-        return;
-    }
-
-    $json = json_decode($body, true);
-    if (!$json || !isset($json['choices'][0])) {
-        wp_send_json_error("Ungültige Antwort von KI.");
-        return;
+        wp_send_json_error("OpenWebUI-Fehler $code – Siehe Log!");
+    return;
     }
 
     // === ROBUSTE EXTRAKTION (OpenAI-kompatibel) ===
