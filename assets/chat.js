@@ -5,17 +5,30 @@ jQuery(function ($) {
     const $i = $('#owc-text');
     const $s = $('#owc-send');
     const $x = $('#owc-close');
+    const $header = $('#owc-header');
     let first = true;
 
     $c.addClass('closed');
 
+    // === Öffnen ===
     $b.on('click', () => {
         $c.toggleClass('closed');
         if (first) { setTimeout(welcome, 400); first = false; }
         setTimeout(() => $i.focus(), 500);
     });
 
-    $x.on('click', () => $c.addClass('closed'));
+    // === Schließen mit Bestätigung ===
+    $x.on('click', () => {
+        if ($m.children().length > 1) { // Nur fragen, wenn Nachrichten da sind
+            if (confirm('Chatverlauf löschen und neu starten?')) {
+                $m.empty();
+                welcome();
+            }
+        }
+        $c.addClass('closed');
+    });
+
+    // === Senden ===
     $s.on('click', send);
     $i.on('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -41,13 +54,16 @@ jQuery(function ($) {
             nonce: owc.nonce
         }, r => {
             let text = r.success ? r.data : 'Fehler';
-            text = text.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>');
+            text = text.replace(/(https?:\/\/[^\s\)]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>');
             $m.append('<div class="bot">' + text + '</div>');
             scroll();
         });
     }
 
-    function scroll() { $m.scrollTop($m[0].scrollHeight); }
+    function scroll() { 
+        $m.scrollTop($m[0].scrollHeight); 
+    }
 
+    // === Pulsierender Bubble ===
     setInterval(() => $b.toggleClass('pulse'), 3000);
 });
