@@ -4,7 +4,32 @@ if (!defined('ABSPATH')) exit;
 add_action('wp_ajax_owc_chat', 'owc_chat');
 add_action('wp_ajax_nopriv_owc_chat', 'owc_chat');
 
-// === VERBESSERT: Stoppwörter-Filter + Keyword-Extraktion ===
+// === NEU: Wetter-Fallback (via kostenlose OpenWeatherMap API) ===
+function owc_get_weather($location = 'Pressbaum,AT') {
+    $api_key = 'dein_openweather_api_key';  // Ersetze durch echten Key (kostenlos bei openweathermap.org)
+    if (empty($api_key) || $api_key === 'dein_openweather_api_key') {
+        return "Wetter-Info nicht verfügbar (API-Key fehlt). Probiere wetter.at!";
+    }
+    
+    $url = "https://api.openweathermap.org/data/2.5/weather?q=" . urlencode($location) . "&appid=" . $api_key . "&units=metric&lang=de";
+    $res = wp_remote_get($url, ['timeout' => 10]);
+    
+    if (is_wp_error($res)) return "Verbindung zum Wetter-Service fehlgeschlagen.";
+    
+    $body = wp_remote_retrieve_body($res);
+    $data = json_decode($body, true);
+    
+    if (isset($data['weather'][0]['description']) && isset($data['main']['temp'])) {
+        $temp = round($data['main']['temp']);
+        $desc = ucfirst($data['weather'][0]['description']);
+        $feels = round($data['main']['feels_like']);
+        return "Heute in $location: $desc, $temp°C (gefühlt $feels°C). Wind: " . round($data['wind']['speed']) . " km/h.";
+    }
+    
+    return "Wetterdaten für $location nicht gefunden.";
+}
+
+// === VERBESSERT: Keywords + Schwarze Liste für externe Themen ===
 function owc_get_relevant_keywords($msg) {
     $stopwords = ['ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'ist', 'bin', 'sei', 'hab', 'habe'];
     $words = preg_split('/\s+/', strtolower($msg));
@@ -21,6 +46,18 @@ function owc_get_relevant_keywords($msg) {
         }
     }
     return array_unique($relevant);
+}
+
+// === NEU: Prüfe auf externe Themen (Wetter, News, etc.) ===
+function owc_is_external_topic($msg) {
+    $external_keywords = [
+        'wetter', 'news', 'aktien', 'kurs', 'ergebnis', 'spiel', 'rezept', 'reise', 'flug'
+    ];
+    $lower_msg = strtolower($msg);
+    foreach ($external_keywords as $kw) {
+        if (strpos($lower_msg, $kw) !== false) return true;
+    }
+    return false;
 }
 
 // Hilfsfunktion: Einfaches Stemming
@@ -41,6 +78,20 @@ function owc_get_api_url() {
 function owc_chat() {
     check_ajax_referer('owc', 'nonce');
     $msg = sanitize_text_field($_POST['msg']);
+
+    // === NEU: Externe Themen abfangen ===
+    if (owc_is_external_topic($msg)) {
+        if (strpos(strtolower($msg), 'wetter') !== false) {
+            preg_match('/wetter\s+(in\s+)?([a-zA-ZäöüÄÖÜ\s\-]+)/i', $msg, $matches);
+            $location = trim($matches[2] ?? 'Pressbaum,AT');
+            $weather = owc_get_weather($location);
+            wp_send_json_success($weather);
+            return;
+        }
+        // Füge mehr Fälle hinzu, z.B. für News: wp_send_json_success("Aktuelle News: Schau bei orf.at!");
+        wp_send_json_success("Das ist ein externes Thema (z.B. News/Wetter). Ich helfe bei Website-Inhalten – frag nach Artikeln!");
+        return;
+    }
 
     $site = get_option('owc_site', []);
     if (empty($site)) { owc_crawl(); $site = get_option('owc_site', []); }
@@ -64,15 +115,14 @@ function owc_chat() {
                 'score' => $score,
                 'url' => get_permalink($p['id']) ?: '#',
                 'title' => $p['title'],
-                'excerpt' => substr(strip_tags($p['content']), 0, 50) . '...'  // Kürzer: 50 Zeichen
+                'excerpt' => substr(strip_tags($p['content']), 0, 50) . '...'
             ];
         }
     }
 
     usort($matches, function($a, $b) { return $b['score'] <=> $a['score']; });
-    $top_match = !empty($matches) ? $matches[0] : null;  // Nur 1
+    $top_match = !empty($matches) ? $matches[0] : null;
 
-    // === GEFIXT: Kürzerer Kontext ===
     $local_context = '';
     if ($top_match) {
         $local_context = "Lokaler Artikel: \"{$top_match['title']}\"\nURL: {$top_match['url']}\nAuszug: {$top_match['excerpt']}\n\n";
@@ -80,11 +130,9 @@ function owc_chat() {
         $local_context = "Keine passende lokale Seite gefunden.\n";
     }
 
-    // === GEFIXT: Kürzerer Prompt (Kontext in User-Message) ===
     $system = "Du bist ein hilfreicher Website-Assistent.\nVERWENDE den lokalen Kontext, falls vorhanden – erwähne Artikel explizit!\nAntworte kurz auf Deutsch.";
     $user_message = $msg . "\n\nKontext: " . $local_context;
 
-    // Token-Proxy-Check (strlen > 2000 → zu lang, Fallback)
     $prompt_length = strlen($system . $user_message);
     if ($prompt_length > 2000) {
         error_log("OWC Warn: Prompt zu lang ($prompt_length Zeichen) – Kontext gekürzt.");
@@ -107,7 +155,7 @@ function owc_chat() {
             'model' => get_option('owc_model', ''),
             'messages' => [
                 ['role' => 'system', 'content' => $system],
-                ['role' => 'user', 'content' => $user_message]  // Kontext hier
+                ['role' => 'user', 'content' => $user_message]
             ],
             'temperature' => 0.7,
             'stream' => false
@@ -123,7 +171,7 @@ function owc_chat() {
 
     $code = wp_remote_retrieve_response_code($res);
     $body = wp_remote_retrieve_body($res);
-    error_log("OWC Response: Code $code | Body-Start: " . substr($body, 0, 200));  // Kürzerer Log
+    error_log("OWC Response: Code $code | Body-Start: " . substr($body, 0, 200));
 
     if ($code !== 200) {
         $error_detail = "HTTP $code: " . substr($body, 0, 500);
