@@ -22,11 +22,10 @@ function owc_admin_page() {
         echo '<div class="notice notice-success"><p>' . $count . ' Seiten NEU gecrawlt!</p></div>';
     }
 
-    // === LEERE Standardwerte ===
-    $protocol = get_option('owc_protocol', 'https://');
-    $host     = get_option('owc_host', '');
-    $port     = get_option('owc_port', '');
-    $model    = get_option('owc_model', '');
+    $protocol = get_option('owc_protocol', 'http://');
+    $host     = get_option('owc_host', 'localhost');
+    $port     = get_option('owc_port', '8080');
+    $model    = get_option('owc_model', 'gemma3:4b');
     $welcome  = get_option('owc_welcome', "Hallo! Ich bin dein KI-Assistent.\nFrag mich alles über diese Website!");
     $bot_name = get_option('owc_bot_name', 'KI-Assistent');
     $api_key  = get_option('owc_api_key', '');
@@ -40,29 +39,27 @@ function owc_admin_page() {
                     <th>Protokoll</th>
                     <td>
                         <select name="protocol">
-                            <option value="https://" <?= selected($protocol, 'https://', false) ?>>https://</option>
                             <option value="http://" <?= selected($protocol, 'http://', false) ?>>http://</option>
+                            <option value="https://" <?= selected($protocol, 'https://', false) ?>>https://</option>
                         </select>
                     </td>
                 </tr>
                 <tr>
                     <th>Host</th>
-                    <td><input type="text" name="host" value="<?= esc_attr($host) ?>" class="regular-text" placeholder="z.B. chat.deine-domain.com"></td>
+                    <td><input type="text" name="host" value="<?= esc_attr($host) ?>" class="regular-text" placeholder="z.B. localhost"></td>
                 </tr>
                 <tr>
                     <th>Port</th>
-                    <td><input type="text" name="port" value="<?= esc_attr($port) ?>" class="small-text" placeholder="z.B. 3000 oder 443"></td>
+                    <td><input type="text" name="port" value="<?= esc_attr($port) ?>" class="small-text" placeholder="z.B. 8080"></td>
                 </tr>
                 <tr>
                     <th>Modell</th>
-                    <td><input type="text" name="model" value="<?= esc_attr($model) ?>" class="regular-text" placeholder="z.B. llama3:latest"></td>
+                    <td><input type="text" name="model" value="<?= esc_attr($model) ?>" class="regular-text" placeholder="z.B. gemma3:4b"></td>
                 </tr>
-
                 <tr>
                     <th>Bot-Name</th>
                     <td><input type="text" name="bot_name" value="<?= esc_attr($bot_name) ?>" class="regular-text" placeholder="z.B. KI-Assistent" /></td>
                 </tr>
-
                 <tr>
                     <th>API-Key</th>
                     <td>
@@ -70,7 +67,6 @@ function owc_admin_page() {
                         <p class="description"><strong>Optional:</strong> OpenWebUI → Settings → API → Generate Key</p>
                     </td>
                 </tr>
-
                 <tr>
                     <th>Willkommensnachricht</th>
                     <td><textarea name="welcome" rows="4" class="large-text"><?= esc_textarea($welcome) ?></textarea></td>
