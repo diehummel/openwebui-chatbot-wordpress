@@ -4,34 +4,32 @@ if (!defined('ABSPATH')) exit;
 add_action('wp_ajax_owc_chat', 'owc_chat');
 add_action('wp_ajax_nopriv_owc_chat', 'owc_chat');
 
-// Hilfsfunktion: Einfaches Stemming (entfernt Endungen für besseres Matching)
+// === VERBESSERT: Stoppwörter-Filter + Keyword-Extraktion ===
+function owc_get_relevant_keywords($msg) {
+    $stopwords = ['ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'ist', 'bin', 'sei', 'hab', 'habe']; // Deutsch-Stoppwörter
+    $words = preg_split('/\s+/', strtolower($msg));
+    $relevant = [];
+    $synonyms = [
+        'pagespeed' => ['page speed', 'pagespeedinsights', 'ladezeit', 'performance', 'optimierung'],
+        'tutorial' => ['anleitung', 'guide', 'hilfe', 'tunen'],
+        // Erweitere bei Bedarf
+    ];
+    foreach ($words as $w) {
+        if (strlen($w) < 3 || in_array($w, $stopwords)) continue;
+        $relevant[] = $w;
+        if (isset($synonyms[$w])) {
+            $relevant = array_merge($relevant, $synonyms[$w]);
+        }
+    }
+    return array_unique($relevant);
+}
+
+// Hilfsfunktion: Einfaches Stemming (für Web-Begriffe)
 function owc_simple_stem($word) {
     $word = strtolower(trim($word));
     if (strlen($word) < 3) return $word;
-    // Einfache Regeln für Deutsch/Englisch (erweiterbar)
-    $word = preg_replace('/(ing|ed|es|s|en|de|te|ung|lich|bar)$/i', '', $word);
+    $word = preg_replace('/(s|es|en|ung|lich)$/i', '', $word); // Einfache Endungs-Entfernung
     return $word;
-}
-
-// Hilfsfunktion: Erweitere Words um Stems + Synonyme (einfach, erweiterbar)
-function owc_get_expanded_words($msg) {
-    $words = preg_split('/\s+/', strtolower($msg));
-    $expanded = [];
-    $synonyms = [
-        'tutorial' => ['anleitung', 'guide', 'hilfe'],
-        'wordpress' => ['wp', 'blog'],
-        // Füge hier mehr hinzu, z.B. aus deinem Content
-    ];
-    foreach ($words as $w) {
-        if (strlen($w) < 3) continue;
-        $stem = owc_simple_stem($w);
-        $expanded[] = $w;
-        $expanded[] = $stem;
-        if (isset($synonyms[$w])) {
-            $expanded = array_merge($expanded, $synonyms[$w]);
-        }
-    }
-    return array_unique($expanded);
 }
 
 function owc_get_api_url() {
@@ -48,43 +46,52 @@ function owc_chat() {
     $site = get_option('owc_site', []);
     if (empty($site)) { owc_crawl(); $site = get_option('owc_site', []); }
 
-    // Erweiterte Word-Extraktion
-    $words = owc_get_expanded_words($msg);
+    // === VERBESSERT: Nur relevante Keywords ===
+    $words = owc_get_relevant_keywords($msg);
 
-    $best_url = $best_title = $best_excerpt = '';
-    $best_score = 0;
-
+    // === Mehrere Matches sammeln (Top 2) ===
+    $matches = [];
     foreach ($site as $p) {
         $text = strtolower($p['title'] . ' ' . $p['content'] . ' ' . ($p['excerpt'] ?? ''));
         $score = 0;
         foreach ($words as $w) {
-            $score += substr_count($text, $w) * 15;
-            if (stripos($p['title'], $w) !== false) $score += 150;
-            if (stripos($text, $w) !== false) $score += 50;
+            $stem_w = owc_simple_stem($w);
+            $score += substr_count($text, $w) * 20;  // Höheres Basis-Gewicht
+            $score += substr_count($text, $stem_w) * 10;
+            if (stripos($p['title'], $w) !== false) $score += 200;  // Starke Title-Priorität
+            if (stripos($text, $w) !== false) $score += 80;  // Content-Boost
         }
-        if ($score > $best_score) {
-            $best_score = $score;
-            $best_url = get_permalink($p['id']) ?: '#';
-            $best_title = $p['title'];
-            $best_excerpt = $p['excerpt'] ?? substr(strip_tags($p['content']), 0, 200) . '...';
+        if ($score > 15) {  // Niedriger Threshold für bessere Treffer
+            $matches[] = [
+                'score' => $score,
+                'url' => get_permalink($p['id']) ?: '#',
+                'title' => $p['title'],
+                'excerpt' => $p['excerpt'] ?? substr(strip_tags($p['content']), 0, 150) . '...'
+            ];
         }
     }
 
-    // Prompt mit Kontext
+    // === Top-Matches sortieren ===
+    usort($matches, function($a, $b) { return $b['score'] <=> $a['score']; });
+    $top_matches = array_slice($matches, 0, 2);  // Bis zu 2 Links
+
     $local_context = '';
-    if ($best_score > 20) {
-        $local_context = "Lokaler Artikel: \"$best_title\"\nURL: $best_url\nAuszug: $best_excerpt\n\n";
+    if (!empty($top_matches)) {
+        foreach ($top_matches as $match) {
+            $local_context .= "Lokaler Artikel: \"{$match['title']}\"\nURL: {$match['url']}\nAuszug: {$match['excerpt']}\n\n";
+        }
     } else {
         $local_context = "Keine passende lokale Seite gefunden. Antworte allgemein zu: $msg\n";
     }
 
+    // === Stärkerer Prompt ===
     $system = "Du bist ein hilfreicher Website-Assistent für diese WordPress-Seite.\n" .
-              "VERWENDE IMMER den folgenden lokalen Kontext, falls vorhanden – baue deine Antwort darauf auf!\n" .
+              "VERWENDE IMMER den lokalen Kontext – baue deine Antwort darauf auf und erwähne die Artikel explizit!\n" .
               "Halte Antworten kurz und relevant. Füge Links ein, wo sinnvoll.\n" .
               $local_context .
               "User-Frage: $msg\nAntworte auf Deutsch.";
 
-    // API-Key
+    // === API-Key ===
     $api_key = get_option('owc_api_key', '');
 
     $headers = ['Content-Type' => 'application/json'];
@@ -119,9 +126,13 @@ function owc_chat() {
     $json = json_decode($body, true);
     $answer = $json['choices'][0]['message']['content'] ?? 'Oops';
 
-    // === NEU: Link hinzufügen, wenn lokaler Artikel gefunden ===
-    if ($best_score > 20) {
-        $answer .= "\n\nMehr dazu: <a href='$best_url' target='_blank' rel='noopener' style='color:#0073aa; text-decoration:underline;'>$best_title</a>";
+    // === VERBESSERT: Links zu Top-Matches anhängen ===
+    $link_text = '';
+    if (!empty($top_matches)) {
+        foreach ($top_matches as $match) {
+            $link_text .= "\n\nMehr dazu: <a href=\"{$match['url']}\" target=\"_blank\" rel=\"noopener\" style=\"color:#0073aa; font-weight:bold; text-decoration:underline;\">{$match['title']}</a>";
+        }
+        $answer .= $link_text;
     }
 
     $answer = preg_replace(
@@ -133,6 +144,7 @@ function owc_chat() {
     wp_send_json_success($answer);
 }
 
+// === Crawl (unverändert, aber Excerpt hilft) ===
 function owc_crawl() {
     $posts = get_posts([
         'numberposts' => -1,
