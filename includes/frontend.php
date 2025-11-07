@@ -4,7 +4,7 @@ if (!defined('ABSPATH')) exit;
 add_action('wp_ajax_owc_chat', 'owc_chat');
 add_action('wp_ajax_nopriv_owc_chat', 'owc_chat');
 
-// === Stemming (FEHLTE!) ===
+// === Stemming ===
 function owc_simple_stem($word) {
     $word = strtolower(trim($word));
     if (strlen($word) < 3) return $word;
@@ -40,7 +40,7 @@ function owc_is_external_topic($msg) {
     return false;
 }
 
-// === API URL – OPENWEBUI KOMPATIBEL ===
+// === API URL – 100% DYNAMISCH AUS ADMIN ===
 function owc_get_api_url() {
     $protocol = get_option('owc_protocol', 'http://');
     $host     = get_option('owc_host', 'localhost');
@@ -105,11 +105,11 @@ function owc_chat() {
     usort($matches, fn($a, $b) => $b['score'] <=> $a['score']);
     $top_match = !empty($matches) ? $matches[0] : null;
 
-    // === MODELL SICHERN ===
-    $model = trim(get_option('owc_model', 'gemma3:4b'));
+    // === MODELL – DYNAMISCH AUS ADMIN ===
+    $model = trim(get_option('owc_model', ''));
     if (empty($model)) {
-        $model = 'gemma3:4b';
-        error_log("OWC: Kein Modell → Fallback: gemma3:4b");
+        $model = 'gemma3:4b';  // Nur Fallback, wenn Admin leer
+        error_log("OWC: Kein Modell im Admin → Fallback: gemma3:4b");
     }
 
     // === Kurzer Prompt ===
@@ -119,13 +119,14 @@ function owc_chat() {
         : "Kein passender Artikel.";
     $user_message = "$msg\nKontext: $context";
 
-    // === API-Call ===
+    // === API-Key – DYNAMISCH AUS ADMIN ===
     $api_key = trim(get_option('owc_api_key', ''));
     $headers = ['Content-Type' => 'application/json'];
     if (!empty($api_key)) {
         $headers['Authorization'] = 'Bearer ' . $api_key;
     }
 
+    // === API URL – DYNAMISCH AUS ADMIN ===
     $api_url = owc_get_api_url();
     error_log("OWC: API Call → $api_url | Modell: $model");
 
