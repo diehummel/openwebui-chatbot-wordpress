@@ -5,21 +5,24 @@ add_action('wp_ajax_owc_chat', 'owc_chat');
 add_action('wp_ajax_nopriv_owc_chat', 'owc_chat');
 
 // === Stemming ===
-function owc_simple_stem($word) {
+function owc_simple_stem(string $word): string {
     $word = strtolower(trim($word));
-    if (strlen($word) < 3) return $word;
-    return preg_replace('/(s|es|en|ung|lich)$/i', '', $word);
+    return strlen($word) < 3 ? $word : preg_replace('/(s|es|en|ung|lich)$/i', '', $word);
 }
 
 // === Keywords ===
-function owc_get_relevant_keywords($msg) {
-    $stopwords = ['ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'ist', 'bin', 'sei', 'hab', 'habe', 'mir', 'dir', 'wie', 'geht', 'es'];
+function owc_get_relevant_keywords(string $msg): array {
+    $stopwords = [
+        'ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von',
+        'ist', 'bin', 'sei', 'hab', 'habe', 'mir', 'dir', 'wie', 'geht', 'es', 'du', 'wer', 'bist', 'dein', 'mein'
+    ];
     $words = preg_split('/\s+/', strtolower($msg));
     $relevant = [];
     $synonyms = [
         'pagespeed' => ['page speed', 'pagespeedinsights', 'ladezeit', 'performance', 'optimierung'],
         'tutorial' => ['anleitung', 'guide', 'hilfe', 'tunen'],
     ];
+
     foreach ($words as $w) {
         if (strlen($w) < 3 || in_array($w, $stopwords)) continue;
         $relevant[] = $w;
@@ -31,7 +34,7 @@ function owc_get_relevant_keywords($msg) {
 }
 
 // === Externe Themen ===
-function owc_is_external_topic($msg) {
+function owc_is_external_topic(string $msg): bool {
     $external = ['wetter', 'news', 'aktien', 'kurs', 'ergebnis', 'spiel', 'rezept', 'reise', 'flug'];
     $lower = strtolower($msg);
     foreach ($external as $kw) {
@@ -40,18 +43,18 @@ function owc_is_external_topic($msg) {
     return false;
 }
 
-// === API URL – 100% DYNAMISCH AUS ADMIN ===
-function owc_get_api_url() {
+// === API URL – 100% DYNAMISCH ===
+function owc_get_api_url(): string {
     $protocol = get_option('owc_protocol', 'http://');
     $host     = get_option('owc_host', 'localhost');
     $port     = get_option('owc_port', '8080');
-    return rtrim($protocol . $host . ':' . $port, ':') . '/api/v1/chat/completions';
+    return rtrim("{$protocol}{$host}:{$port}", ':') . '/api/v1/chat/completions';
 }
 
 // === Hauptfunktion ===
-function owc_chat() {
+function owc_chat(): void {
     check_ajax_referer('owc', 'nonce');
-    $msg = sanitize_text_field($_POST['msg']);
+    $msg = sanitize_text_field($_POST['msg'] ?? '');
 
     // === Externe Themen ===
     if (owc_is_external_topic($msg)) {
@@ -60,11 +63,14 @@ function owc_chat() {
     }
 
     $site = get_option('owc_site', []);
-    if (empty($site)) { owc_crawl(); $site = get_option('owc_site', []); }
+    if (empty($site)) {
+        owc_crawl();
+        $site = get_option('owc_site', []);
+    }
 
     $words = owc_get_relevant_keywords($msg);
 
-    // === Keine Keywords → keine Suche ===
+    // === KEINE KEYWORDS → KEIN API-CALL ===
     if (empty($words)) {
         wp_send_json_success("Frag nach einem Thema aus der Website – z.B. 'Pagespeed' oder 'WordPress'!");
         return;
@@ -82,7 +88,7 @@ function owc_chat() {
         }
         if (!$title_match) continue;
 
-        $content_lower = strtolower(substr($p['content'], 0, 2000));
+        $content_lower = strtolower(substr($p['content'], 0, 1500));
         $text = $title_lower . ' ' . $content_lower;
 
         $score = 0;
@@ -96,20 +102,23 @@ function owc_chat() {
         if ($score > 15) {
             $matches[] = [
                 'score' => $score,
-                'url' => get_permalink($p['id']) ?: '#',
+                'url'   => get_permalink($p['id']) ?: '#',
                 'title' => $p['title']
             ];
         }
     }
 
+    // === SORTIEREN MIT ARROW FUNCTION (PHP 8.4 OK!) ===
     usort($matches, fn($a, $b) => $b['score'] <=> $a['score']);
-    $top_match = !empty($matches) ? $matches[0] : null;
+    $top_match = $matches[0] ?? null;
 
-    // === MODELL – DYNAMISCH AUS ADMIN ===
-    $model = trim(get_option('owc_model', ''));
-    if (empty($model)) {
-        $model = 'gemma3:4b';  // Nur Fallback, wenn Admin leer
-        error_log("OWC: Kein Modell im Admin → Fallback: gemma3:4b");
+    // === MODELL & API-Key aus Admin ===
+    $model   = trim(get_option('owc_model', 'gemma3:4b'));
+    $api_key = trim(get_option('owc_api_key', ''));
+
+    $headers = ['Content-Type' => 'application/json'];
+    if ($api_key !== '') {
+        $headers['Authorization'] = "Bearer {$api_key}";
     }
 
     // === Kurzer Prompt ===
@@ -117,48 +126,40 @@ function owc_chat() {
     $context = $top_match
         ? "Artikel: {$top_match['title']} – {$top_match['url']}"
         : "Kein passender Artikel.";
-    $user_message = "$msg\nKontext: $context";
+    $user_message = "{$msg}\nKontext: {$context}";
 
-    // === API-Key – DYNAMISCH AUS ADMIN ===
-    $api_key = trim(get_option('owc_api_key', ''));
-    $headers = ['Content-Type' => 'application/json'];
-    if (!empty($api_key)) {
-        $headers['Authorization'] = 'Bearer ' . $api_key;
-    }
-
-    // === API URL – DYNAMISCH AUS ADMIN ===
     $api_url = owc_get_api_url();
-    error_log("OWC: API Call → $api_url | Modell: $model");
+    error_log("OWC: API Call → {$api_url} | Modell: {$model}");
 
     $res = wp_remote_post($api_url, [
-        'headers' => $headers,
-        'body' => json_encode([
-            'model' => $model,
-            'messages' => [
+        'headers'  => $headers,
+        'body'     => json_encode([
+            'model'       => $model,
+            'messages'    => [
                 ['role' => 'system', 'content' => $system],
-                ['role' => 'user', 'content' => $user_message]
+                ['role' => 'user',   'content' => $user_message]
             ],
             'temperature' => 0.7,
-            'max_tokens' => 150,
-            'stream' => false
+            'max_tokens'  => 120,
+            'stream'      => false
         ], JSON_UNESCAPED_UNICODE),
-        'timeout' => 300
+        'timeout'  => 300
     ]);
 
     // === Fehlerbehandlung ===
     if (is_wp_error($res)) {
         $err = $res->get_error_message();
-        error_log("OWC WP_Error: $err");
-        wp_send_json_error("Verbindung fehlgeschlagen: $err");
+        error_log("OWC WP_Error: {$err}");
+        wp_send_json_error("Verbindung fehlgeschlagen: {$err}");
         return;
     }
 
     $code = wp_remote_retrieve_response_code($res);
     $body = wp_remote_retrieve_body($res);
-    error_log("OWC Response: Code $code | Body: " . substr($body, 0, 300));
+    error_log("OWC Response: Code {$code} | Body: " . substr($body, 0, 300));
 
     if ($code !== 200) {
-        wp_send_json_error("OpenWebUI-Fehler $code");
+        wp_send_json_error("OpenWebUI-Fehler {$code}");
         return;
     }
 
@@ -173,7 +174,7 @@ function owc_chat() {
     // === Link anhängen ===
     if ($top_match) {
         $link = '<a href="' . esc_url($top_match['url']) . '" target="_blank" rel="noopener" style="color:#0073aa; font-weight:bold; text-decoration:underline;">' . esc_html($top_match['title']) . '</a>';
-        $answer .= "\n\nMehr dazu: $link";
+        $answer .= "\n\nMehr dazu: {$link}";
         $answer = str_replace($top_match['url'], '', $answer);
     }
 
@@ -188,18 +189,18 @@ function owc_chat() {
 }
 
 // === Crawl ===
-function owc_crawl() {
+function owc_crawl(): int {
     $posts = get_posts([
         'numberposts' => -1,
         'post_status' => ['publish', 'private'],
-        'post_type' => 'any'
+        'post_type'   => 'any'
     ]);
 
     $data = [];
     foreach ($posts as $p) {
         $data[] = [
-            'id' => $p->ID,
-            'title' => $p->post_title,
+            'id'      => $p->ID,
+            'title'   => $p->post_title,
             'content' => wp_strip_all_tags($p->post_content)
         ];
     }
