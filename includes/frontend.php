@@ -1,7 +1,6 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
-// === KORREKT: add_action (nicht add_add_action!) ===
 add_action('wp_ajax_owc_chat', 'owc_chat');
 add_action('wp_ajax_nopriv_owc_chat', 'owc_chat');
 
@@ -14,10 +13,7 @@ function owc_simple_stem($word) {
 
 // === Keywords ===
 function owc_get_relevant_keywords($msg) {
-    $stopwords = [
-        'ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von',
-        'ist', 'bin', 'sei', 'hab', 'habe', 'mir', 'dir', 'wie', 'geht', 'es', 'du', 'wer', 'bist', 'dein', 'mein'
-    ];
+    $stopwords = ['ich', 'suche', 'etwas', 'über', 'zu', 'das', 'der', 'die', 'und', 'oder', 'in', 'auf', 'mit', 'für', 'von', 'ist', 'bin', 'sei', 'hab', 'habe', 'mir', 'dir', 'wie', 'geht', 'es', 'wer', 'bist', 'du'];
     $words = preg_split('/\s+/', strtolower($msg));
     $relevant = [];
     $synonyms = [
@@ -47,14 +43,9 @@ function owc_is_external_topic($msg) {
 // === API URL – DYNAMISCH ===
 function owc_get_api_url() {
     $protocol = get_option('owc_protocol', 'http://');
-    $host     = get_option('owc_host', 'localhost');
-    $port     = get_option('owc_port', '8080');
+    $host = get_option('owc_host', 'localhost');
+    $port = get_option('owc_port', '8080');
     return rtrim($protocol . $host . ':' . $port, ':') . '/api/v1/chat/completions';
-}
-
-// === Sortierfunktion (PHP 8.4 kompatibel) ===
-function owc_sort_matches($a, $b) {
-    return $b['score'] <=> $a['score'];
 }
 
 // === Hauptfunktion ===
@@ -69,14 +60,14 @@ function owc_chat() {
     }
 
     $site = get_option('owc_site', []);
-    if (empty($site)) {
-        owc_crawl();
-        $site = get_option('owc_site', []);
+    if (empty($site)) { 
+        owc_crawl(); 
+        $site = get_option('owc_site', []); 
     }
 
     $words = owc_get_relevant_keywords($msg);
 
-    // === KEINE KEYWORDS → KEIN API-CALL! ===
+    // === Keine Keywords → keine Suche ===
     if (empty($words)) {
         wp_send_json_success("Frag nach einem Thema aus der Website – z.B. 'Pagespeed' oder 'WordPress'!");
         return;
@@ -94,7 +85,7 @@ function owc_chat() {
         }
         if (!$title_match) continue;
 
-        $content_lower = strtolower(substr($p['content'], 0, 1500));
+        $content_lower = strtolower(substr($p['content'], 0, 2000));
         $text = $title_lower . ' ' . $content_lower;
 
         $score = 0;
@@ -114,17 +105,17 @@ function owc_chat() {
         }
     }
 
-    // === SORTIEREN ===
-    usort($matches, 'owc_sort_matches');
+    // === Sortieren ===
+    usort($matches, function($a, $b) { 
+        return $b['score'] <=> $a['score']; 
+    });
     $top_match = !empty($matches) ? $matches[0] : null;
 
-    // === MODELL & API-Key aus Admin ===
+    // === MODELL SICHERN ===
     $model = trim(get_option('owc_model', 'gemma3:4b'));
-    $api_key = trim(get_option('owc_api_key', ''));
-
-    $headers = ['Content-Type' => 'application/json'];
-    if (!empty($api_key)) {
-        $headers['Authorization'] = 'Bearer ' . $api_key;
+    if (empty($model)) {
+        $model = 'gemma3:4b';
+        error_log("OWC: Kein Modell im Admin → Fallback: gemma3:4b");
     }
 
     // === Kurzer Prompt ===
@@ -133,6 +124,13 @@ function owc_chat() {
         ? "Artikel: {$top_match['title']} – {$top_match['url']}"
         : "Kein passender Artikel.";
     $user_message = "$msg\nKontext: $context";
+
+    // === API-Call ===
+    $api_key = trim(get_option('owc_api_key', ''));
+    $headers = ['Content-Type' => 'application/json'];
+    if (!empty($api_key)) {
+        $headers['Authorization'] = 'Bearer ' . $api_key;
+    }
 
     $api_url = owc_get_api_url();
     error_log("OWC: API Call → $api_url | Modell: $model");
@@ -146,7 +144,7 @@ function owc_chat() {
                 ['role' => 'user', 'content' => $user_message]
             ],
             'temperature' => 0.7,
-            'max_tokens' => 120,
+            'max_tokens' => 150,
             'stream' => false
         ], JSON_UNESCAPED_UNICODE),
         'timeout' => 300
@@ -194,7 +192,7 @@ function owc_chat() {
     wp_send_json_success($answer);
 }
 
-// === Crawl ===
+// === Crawl (gefixt – keine doppelte Zeile!) ===
 function owc_crawl() {
     $posts = get_posts([
         'numberposts' => -1,
@@ -207,7 +205,7 @@ function owc_crawl() {
         $data[] = [
             'id' => $p->ID,
             'title' => $p->post_title,
-            'content' => wp_strip_all_tags($p->post_content)
+            'content' => wp_strip_all_tags($p->post_content)  // Geändert: $p->post_content
         ];
     }
     update_option('owc_site', $data);
