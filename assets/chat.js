@@ -10,25 +10,20 @@ jQuery(function ($) {
 
     $c.addClass('closed');
 
-    // === Öffnen ===
     $b.on('click', () => {
         $c.toggleClass('closed');
         if (first) { setTimeout(welcome, 400); first = false; }
         setTimeout(() => $i.focus(), 500);
     });
 
-    // === Schließen mit Bestätigung ===
     $x.on('click', () => {
-        if ($m.children().length > 1) {
-            if (confirm('Chatverlauf löschen und neu starten?')) {
-                $m.empty();
-                welcome();
-            }
+        if ($m.children().length > 1 && confirm('Chatverlauf löschen und neu starten?')) {
+            $m.empty();
+            welcome();
         }
         $c.addClass('closed');
     });
 
-    // === Senden ===
     $s.on('click', send);
     $i.on('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -70,8 +65,6 @@ jQuery(function ($) {
         $m.append('<div class="user">Du: ' + msg + '</div>');
         $i.val(''); 
         scroll();
-
-        // === Lade-Animation starten ===
         showTyping();
 
         $.post(owc.ajax, {
@@ -79,9 +72,7 @@ jQuery(function ($) {
             msg: msg,
             nonce: owc.nonce
         }, r => {
-            // === Lade-Animation stoppen ===
             hideTyping();
-
             let text = r.success ? r.data : 'Fehler';
             text = text.replace(/(https?:\/\/[^\s\)]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>');
             $m.append('<div class="bot">' + text + '</div>');
@@ -97,6 +88,5 @@ jQuery(function ($) {
         $m.scrollTop($m[0].scrollHeight); 
     }
 
-    // === Pulsierender Bubble ===
     setInterval(() => $b.toggleClass('pulse'), 3000);
 });
