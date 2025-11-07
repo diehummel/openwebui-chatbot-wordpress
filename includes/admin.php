@@ -12,7 +12,7 @@ function owc_admin_page() {
         update_option('owc_port', sanitize_text_field($_POST['port']));
         update_option('owc_model', sanitize_text_field($_POST['model']));
         update_option('owc_welcome', wp_kses_post($_POST['welcome']));
-        // === NEU: API-Key speichern ===
+        update_option('owc_bot_name', sanitize_text_field($_POST['bot_name']));
         update_option('owc_api_key', sanitize_text_field($_POST['api_key']));
         echo '<div class="notice notice-success"><p>Einstellungen gespeichert!</p></div>';
     }
@@ -22,12 +22,13 @@ function owc_admin_page() {
         echo '<div class="notice notice-success"><p>' . $count . ' Seiten NEU gecrawlt!</p></div>';
     }
 
+    // === LEERE Standardwerte ===
     $protocol = get_option('owc_protocol', 'https://');
-    $host     = get_option('owc_host', 'chat.hummel-web.at');
-    $port     = get_option('owc_port', '443');
-    $model    = get_option('owc_model', 'gemma3:latest');
+    $host     = get_option('owc_host', '');
+    $port     = get_option('owc_port', '');
+    $model    = get_option('owc_model', '');
     $welcome  = get_option('owc_welcome', "Hallo! Ich bin dein KI-Assistent.\nFrag mich alles über diese Website!");
-    // === NEU: API-Key laden ===
+    $bot_name = get_option('owc_bot_name', 'KI-Assistent');
     $api_key  = get_option('owc_api_key', '');
 
     ?>
@@ -46,25 +47,27 @@ function owc_admin_page() {
                 </tr>
                 <tr>
                     <th>Host</th>
-                    <td><input type="text" name="host" value="<?= esc_attr($host) ?>" class="regular-text" placeholder="chat.hummel-web.at"></td>
+                    <td><input type="text" name="host" value="<?= esc_attr($host) ?>" class="regular-text" placeholder="z.B. chat.deine-domain.com"></td>
                 </tr>
                 <tr>
                     <th>Port</th>
-                    <td><input type="text" name="port" value="<?= esc_attr($port) ?>" class="small-text" placeholder="443"></td>
+                    <td><input type="text" name="port" value="<?= esc_attr($port) ?>" class="small-text" placeholder="z.B. 3000 oder 443"></td>
                 </tr>
                 <tr>
                     <th>Modell</th>
-                    <td><input type="text" name="model" value="<?= esc_attr($model) ?>" class="regular-text" placeholder="gemma3:latest"></td>
+                    <td><input type="text" name="model" value="<?= esc_attr($model) ?>" class="regular-text" placeholder="z.B. llama3:latest"></td>
                 </tr>
 
-                <!-- === NEU: API-Key Feld === -->
+                <tr>
+                    <th>Bot-Name</th>
+                    <td><input type="text" name="bot_name" value="<?= esc_attr($bot_name) ?>" class="regular-text" placeholder="z.B. KI-Assistent" /></td>
+                </tr>
+
                 <tr>
                     <th>API-Key</th>
                     <td>
-                        <input type="password" name="api_key" value="<?= esc_attr($api_key) ?>" class="regular-text" autocomplete="off" placeholder="z.B. owk_abc123..." />
-                        <p class="description">
-                            <strong>Optional:</strong> In OpenWebUI → <em>Settings → API → Generate Key</em>
-                        </p>
+                        <input type="password" name="api_key" value="<?= esc_attr($api_key) ?>" class="regular-text" autocomplete="off" placeholder="owk_..." />
+                        <p class="description"><strong>Optional:</strong> OpenWebUI → Settings → API → Generate Key</p>
                     </td>
                 </tr>
 
