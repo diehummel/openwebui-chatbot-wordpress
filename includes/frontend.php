@@ -40,34 +40,46 @@ function owc_is_external_topic($msg) {
     return false;
 }
 
-// === API URL – DYNAMISCH ===
+// === API URL – ROBUST ===
 function owc_get_api_url() {
-    $protocol = get_option('owc_protocol', 'http://');
-    $host = get_option('owc_host', 'localhost');
-    $port = get_option('owc_port', '8080');
-    return rtrim($protocol . $host . ':' . $port, ':') . '/api/v1/chat/completions';
+    $protocol = trim(get_option('owc_protocol', 'http://'));
+    $host = trim(get_option('owc_host', 'localhost'));
+    $port = trim(get_option('owc_port', '8080'));
+
+    // Sicherstellen: Protokoll hat ://
+    if (!preg_match('#^https?://#i', $protocol)) {
+        $protocol = 'http://';
+    }
+
+    $url = $protocol . $host;
+    if (!empty($port) && $port !== '80' && $port !== '443') {
+        $url .= ':' . $port;
+    }
+    return rtrim($url, '/') . '/api/v1/chat/completions';
 }
 
 // === Hauptfunktion ===
 function owc_chat() {
-    check_ajax_referer('owc', 'nonce');
-    $msg = sanitize_text_field($_POST['msg']);
+    // === NONCE FIX: Manuelle Prüfung statt check_ajax_referer() ===
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'owc')) {
+        wp_send_json_error('Sicherheitsprüfung fehlgeschlagen.');
+        return;
+    }
 
-    // === Externe Themen ===
+    $msg = sanitize_text_field($_POST['msg'] ?? '');
+
     if (owc_is_external_topic($msg)) {
         wp_send_json_success("Ich kenne nur Inhalte dieser Website. Frag nach Artikeln!");
         return;
     }
 
     $site = get_option('owc_site', []);
-    if (empty($site)) { 
-        owc_crawl(); 
-        $site = get_option('owc_site', []); 
+    if (empty($site)) {
+        owc_crawl();
+        $site = get_option('owc_site', []);
     }
 
     $words = owc_get_relevant_keywords($msg);
-
-    // === Keine Keywords → keine Suche ===
     if (empty($words)) {
         wp_send_json_success("Frag nach einem Thema aus der Website – z.B. 'Pagespeed' oder 'WordPress'!");
         return;
@@ -105,12 +117,9 @@ function owc_chat() {
         }
     }
 
-    usort($matches, function($a, $b) { 
-        return $b['score'] <=> $a['score']; 
-    });
-    $top_match = !empty($matches) ? $matches[0] : null;
+    usort($matches, fn($a, $b) => $b['score'] <=> $a['score']);
+    $top_match = $matches[0] ?? null;
 
-    // === MODELL & API-Key ===
     $model = trim(get_option('owc_model', 'gemma3:4b'));
     $api_key = trim(get_option('owc_api_key', ''));
 
@@ -120,13 +129,10 @@ function owc_chat() {
     }
 
     $system = "Du bist ein KI-Assistent für diese Website. Antworte kurz und hilfreich.";
-    $context = $top_match
-        ? "Artikel: {$top_match['title']} – {$top_match['url']}"
-        : "Kein passender Artikel.";
+    $context = $top_match ? "Artikel: {$top_match['title']} – {$top_match['url']}" : "Kein passender Artikel.";
     $user_message = "$msg\nKontext: $context";
 
     $api_url = owc_get_api_url();
-    error_log("OWC: API Call → $api_url | Modell: $model");
 
     $res = wp_remote_post($api_url, [
         'headers' => $headers,
@@ -140,55 +146,36 @@ function owc_chat() {
             'max_tokens' => 150,
             'stream' => false
         ], JSON_UNESCAPED_UNICODE),
-        'timeout' => 300
+        'timeout' => 60
     ]);
 
-    // === Fehlerbehandlung ===
     if (is_wp_error($res)) {
         $err = $res->get_error_message();
-        error_log("OWC WP_Error: $err");
         wp_send_json_error("Verbindung fehlgeschlagen: $err");
-       return;
+        return;
     }
 
     $code = wp_remote_retrieve_response_code($res);
     $body = wp_remote_retrieve_body($res);
 
-    // === DEBUG: Alles ins Log ===
-    error_log("OWC Response Code: $code");
-    error_log("OWC Response Body: " . substr($body, 0, 1000));
-    error_log("OWC Request URL: " . $api_url);
-    error_log("OWC Model: " . $model);
-    error_log("OWC Headers: " . print_r($headers, true));
-
     if ($code !== 200) {
-        wp_send_json_error("OpenWebUI-Fehler $code – Siehe Log!");
-    return;
-    }
-
-    // === ROBUSTE EXTRAKTION (OpenAI-kompatibel) ===
-    $choice = $json['choices'][0];
-    $answer = '';
-
-    if (isset($choice['message']['content'])) {
-        $answer = $choice['message']['content'];
-    } elseif (isset($choice['text'])) {
-        $answer = $choice['text'];
-    } elseif (isset($choice['delta']['content'])) {
-        $answer = $choice['delta']['content'];
-    } else {
-        wp_send_json_error("KI hat nicht geantwortet (kein Inhalt).");
+        wp_send_json_error("OpenWebUI-Fehler $code");
         return;
     }
 
-    // === Link anhängen ===
+    $json = json_decode($body, true);
+    if (!$json || !isset($json['choices'][0]['message']['content'])) {
+        wp_send_json_error("Ungültige Antwort von KI.");
+        return;
+    }
+
+    $answer = $json['choices'][0]['message']['content'];
+
     if ($top_match) {
         $link = '<a href="' . esc_url($top_match['url']) . '" target="_blank" rel="noopener" style="color:#0073aa; font-weight:bold; text-decoration:underline;">' . esc_html($top_match['title']) . '</a>';
         $answer .= "\n\nMehr dazu: $link";
-        $answer = str_replace($top_match['url'], '', $answer);
     }
 
-    // === URLs verlinken ===
     $answer = preg_replace(
         '/(https?:\/\/[^\s\)<]+)(?![^<]*<\/a>)/',
         '<a href="$1" target="_blank" rel="noopener" style="color:#0073aa; text-decoration:underline;">$1</a>',
